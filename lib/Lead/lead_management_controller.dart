@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -36,6 +38,7 @@ class LeadManagementController extends GetxController {
   var deliveryDate = Rxn<DateTime>();
   final RxnString selectedDistrict = RxnString();
   final RxnString selectedTaluk = RxnString();
+  final String? userId = FirebaseAuth.instance.currentUser?.uid;
 
   /// Get list of districts
   List<String> get districts => keralaPlaces.keys.toList();
@@ -62,7 +65,7 @@ class LeadManagementController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-
+    log("User Id is:$userId");
     fetchProducts();
     fetchMakers();
     selectedStatus.listen((status) {
@@ -227,9 +230,8 @@ class LeadManagementController extends GetxController {
       }
 
       final productDoc = querySnapshot.docs.first;
-      final docId = productDoc.id; // This is the Firestore document ID
-      final productId =
-          productDoc['id']; // This is the 'id' field inside the document
+      final docId = productDoc.id; // Firestore document ID
+      final productId = productDoc['id']; // 'id' field inside the document
       debugPrint("Document ID: $docId");
       debugPrint("Product ID field: $productId");
 
@@ -251,14 +253,13 @@ class LeadManagementController extends GetxController {
         );
         return;
       }
-      final userId = currentUser.uid;
-
+      log("User ID: $userId");
+      // 👇 Save Lead
       final newDocRef = _firestore.collection('Leads').doc();
       await newDocRef.set({
         'leadId': leadId,
         'name': nameController.text,
         'place': "${talukController.text},${districtController.text}",
-
         'address': addressController.text,
         'phone1': phoneController.text,
         'phone2': phone2Controller.text.isNotEmpty
@@ -274,14 +275,13 @@ class LeadManagementController extends GetxController {
         'followUpTime': selectedTime.value != null
             ? "${selectedTime.value!.hour.toString().padLeft(2, '0')}:${selectedTime.value!.minute.toString().padLeft(2, '0')}"
             : "",
-
         'createdAt': Timestamp.now(),
         'salesmanID': userId,
         'isArchived': false,
         'customerId': customerId,
       });
 
-      // 👇 Save a new customer (if needed)
+      // 👇 Save Customer (if needed)
       await _firestore.collection('Customers').add({
         'customerId': customerId,
         'name': nameController.text,
@@ -293,6 +293,11 @@ class LeadManagementController extends GetxController {
             : null,
         'createdAt': Timestamp.now(),
       });
+
+      // 👇 Increment totalLeads for the current user
+      await _firestore.collection('users').doc(userId).set({
+        'totalLeads': FieldValue.increment(1),
+      }, SetOptions(merge: true));
 
       Get.snackbar(
         'Success',
@@ -421,6 +426,10 @@ class LeadManagementController extends GetxController {
         'order_status': "pending",
         'cancel': false,
       });
+
+      await _firestore.collection('users').doc(userId).set({
+        'totalOrders': FieldValue.increment(1),
+      }, SetOptions(merge: true));
 
       Get.snackbar(
         'Success',

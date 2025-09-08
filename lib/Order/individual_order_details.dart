@@ -1,11 +1,12 @@
 // ignore_for_file: unnecessary_null_comparison
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:sales/Order/order_managmenet.dart';
+import 'package:sales/Home/home.dart';
 
 class IndividualOrderDetails extends StatelessWidget {
   final Map<String, dynamic> data;
@@ -104,6 +105,9 @@ class IndividualOrderDetails extends StatelessWidget {
   }
 
   Future<void> _cancelOrder(BuildContext context) async {
+    final FirebaseFirestore firestore = FirebaseFirestore.instance;
+    final String? userId = FirebaseAuth.instance.currentUser?.uid;
+
     try {
       if (docId == null || docId.isEmpty) {
         throw Exception("Order document ID is null or empty.");
@@ -155,6 +159,10 @@ class IndividualOrderDetails extends StatelessWidget {
         transaction.update(productRef, {'stock': currentStock + currentNos});
       });
 
+      await firestore.collection('users').doc(userId).set({
+        'totalOrders': FieldValue.increment(-1),
+      }, SetOptions(merge: true));
+
       Get.snackbar(
         'Order Cancelled',
         'The order has been successfully cancelled and stock updated.',
@@ -162,7 +170,7 @@ class IndividualOrderDetails extends StatelessWidget {
         colorText: Colors.white,
       );
 
-      Get.off(() => OrderManagement());
+      Get.offAll(() => Home());
     } catch (e) {
       print('Oops! cancelling order: $e');
       Get.snackbar(
@@ -201,12 +209,10 @@ class IndividualOrderDetails extends StatelessWidget {
             color: Colors.white,
           ),
         ),
+        automaticallyImplyLeading: false,
         leading: IconButton(
           onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => OrderManagement()),
-            );
+            Get.back();
           },
           icon: Icon(Icons.arrow_back, color: Colors.white),
         ),

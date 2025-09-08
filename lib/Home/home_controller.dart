@@ -261,10 +261,10 @@ class HomeController extends GetxController {
   // --- Firestore Count Fetching ---
 
   Future<void> fetchCounts() async {
-    final userId = _auth.currentUser?.uid;
-    if (userId == null) {
+    final user = _auth.currentUser;
+    if (user == null) {
       Get.snackbar(
-        ' Authentication Required',
+        'Authentication Required',
         'Please log in.',
         snackPosition: SnackPosition.BOTTOM,
         backgroundColor: Colors.red,
@@ -276,42 +276,24 @@ class HomeController extends GetxController {
     try {
       isLoading.value = true;
 
-      final now = DateTime.now();
-      final start = DateTime(now.year, now.month, 1);
-      final end = DateTime(now.year, now.month + 1, 1);
-
-      // Leads
-      final leads = await _firestore
-          .collection('Leads')
-          .where('salesmanID', isEqualTo: userId)
-          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
-          .where('createdAt', isLessThan: Timestamp.fromDate(end))
-          .where('isArchived', isEqualTo: false)
+      final docSnapshot = await _firestore
+          .collection('users')
+          .doc(user.uid)
           .get();
-      totalLeads.value = leads.size;
 
-      // Orders
-      final orders = await _firestore
-          .collection('Orders')
-          .where('salesmanID', isEqualTo: userId)
-          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
-          .where('createdAt', isLessThan: Timestamp.fromDate(end))
-          .get();
-      totalOrders.value = orders.size;
+      if (docSnapshot.exists) {
+        final data = docSnapshot.data() as Map<String, dynamic>;
 
-      // Delivered Orders = Post Sale Follow-Up
-      final postFollowUps = await _firestore
-          .collection('Orders')
-          .where('salesmanID', isEqualTo: userId)
-          .where('order_status', isEqualTo: 'delivered')
-          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
-          .where('createdAt', isLessThan: Timestamp.fromDate(end))
-          .get();
-      totalPostSaleFollowUp.value = postFollowUps.size;
+        totalLeads.value = data['totalLeads'] ?? 0;
+        totalOrders.value = data['totalOrders'] ?? 0;
+        totalPostSaleFollowUp.value = data['totalPostSaleFollowUp'] ?? 0;
 
-      debugPrint(
-        "Counts - Leads: ${totalLeads.value}, Orders: ${totalOrders.value}, FollowUps: ${totalPostSaleFollowUp.value}",
-      );
+        debugPrint(
+          "Counts - Leads: ${totalLeads.value}, Orders: ${totalOrders.value}, FollowUps: ${totalPostSaleFollowUp.value}",
+        );
+      } else {
+        debugPrint("User document not found!");
+      }
     } catch (e, stackTrace) {
       debugPrint("Error fetching counts: $e\n$stackTrace");
       Get.snackbar(

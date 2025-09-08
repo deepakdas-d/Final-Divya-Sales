@@ -2,7 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:sales/FollowUp/followup.dart';
+import 'package:sales/Home/home.dart';
 
 class LeadDetailsController extends GetxController {
   final String? leadId; // To receive leadId for existing leads
@@ -449,6 +449,12 @@ class LeadDetailsController extends GetxController {
 
       // ✅ Delete from Leads collection using the correct doc ID
       await _firestore.collection('Leads').doc(leadDocId).delete();
+      await _firestore.collection('users').doc(userId).set({
+        'totalLeads': FieldValue.increment(-1), // decrement by 1
+      }, SetOptions(merge: true));
+      await _firestore.collection('users').doc(userId).set({
+        'totalOrders': FieldValue.increment(1), // decrement by 1
+      }, SetOptions(merge: true));
 
       Get.snackbar(
         'Success',
@@ -457,7 +463,8 @@ class LeadDetailsController extends GetxController {
         colorText: Color(0xFF014185),
       );
       clearForm();
-      Get.offAll(FollowupPage());
+
+      Get.offAll(Home());
     } catch (e) {
       Get.snackbar(
         'Oops!',
@@ -564,10 +571,15 @@ class LeadDetailsController extends GetxController {
   }
 
   Future<void> archiveDocument(String leadDocId) async {
+    final String? userId = FirebaseAuth.instance.currentUser?.uid;
+
     try {
       await _firestore.collection('Leads').doc(leadDocId).update({
         'isArchived': true,
       });
+      await _firestore.collection('users').doc(userId).set({
+        'totalLeads': FieldValue.increment(-1), // decrement by 1
+      }, SetOptions(merge: true));
 
       Get.snackbar(
         'Success',

@@ -61,6 +61,7 @@ class FollowupPage extends StatelessWidget {
           color: Colors.white,
         ),
       ),
+      automaticallyImplyLeading: true,
       centerTitle: true,
       backgroundColor: const Color(0xFF014185),
       foregroundColor: Colors.white,
