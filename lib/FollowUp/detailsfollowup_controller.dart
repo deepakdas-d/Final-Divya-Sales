@@ -446,14 +446,18 @@ class LeadDetailsController extends GetxController {
         'createdAt': Timestamp.now(),
         'order_status': "pending",
       });
+      final makerId = selectedMakerId.value;
 
       // ✅ Delete from Leads collection using the correct doc ID
       await _firestore.collection('Leads').doc(leadDocId).delete();
       await _firestore.collection('users').doc(userId).set({
-        'totalLeads': FieldValue.increment(-1), // decrement by 1
+        'totalLeads': FieldValue.increment(-1),
       }, SetOptions(merge: true));
       await _firestore.collection('users').doc(userId).set({
-        'totalOrders': FieldValue.increment(1), // decrement by 1
+        'totalOrders': FieldValue.increment(1),
+      }, SetOptions(merge: true));
+      await _firestore.collection('users').doc(makerId).set({
+        'totalOrders': FieldValue.increment(1),
       }, SetOptions(merge: true));
 
       Get.snackbar(
@@ -542,10 +546,15 @@ class LeadDetailsController extends GetxController {
   }
 
   String? validatePhone(String? value) {
-    if (value == null || value.isEmpty) return 'Phone is required';
-    if (!RegExp(r'^\d{10}$').hasMatch(value)) {
-      return 'Enter valid 10-digit phone number';
+    if (value == null || value.isEmpty) return 'Phone number is required';
+
+    // Allow optional +, and length 10 to 15 digits
+    final regex = RegExp(r'^\+?[0-9]{10,15}$');
+
+    if (!regex.hasMatch(value)) {
+      return 'Enter a valid phone number (10–15 digits)';
     }
+
     return null;
   }
 

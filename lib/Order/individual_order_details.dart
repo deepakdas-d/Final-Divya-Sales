@@ -155,13 +155,44 @@ class IndividualOrderDetails extends StatelessWidget {
           );
         }
 
-        transaction.update(orderRef, {'Cancel': true});
+        transaction.update(orderRef, {'cancel': true});
         transaction.update(productRef, {'stock': currentStock + currentNos});
       });
 
-      await firestore.collection('users').doc(userId).set({
-        'totalOrders': FieldValue.increment(-1),
-      }, SetOptions(merge: true));
+      // Decrement the user's totalOrders count
+      final docRef1 = firestore.collection('users').doc(userId);
+
+      await firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(docRef1);
+
+        if (!snapshot.exists) {
+          transaction.set(docRef1, {'totalOrders': 0}, SetOptions(merge: true));
+          return;
+        }
+
+        final current = (snapshot.data()?['totalOrders'] ?? 0) as int;
+        final newValue = current > 0 ? current - 1 : 0;
+
+        transaction.set(docRef1, {
+          'totalOrders': newValue,
+        }, SetOptions(merge: true));
+      });
+
+      //   the maker's totalOrders
+      final docRef = firestore.collection('users').doc(data['makerId']);
+
+      await firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(docRef);
+        if (!snapshot.exists) return;
+
+        final currentOrders = (snapshot.data()?['totalOrders'] ?? 0) as int;
+
+        final newOrders = currentOrders > 0 ? currentOrders - 1 : 0;
+
+        transaction.set(docRef, {
+          'totalOrders': newOrders,
+        }, SetOptions(merge: true));
+      });
 
       Get.snackbar(
         'Order Cancelled',
