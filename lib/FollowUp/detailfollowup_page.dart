@@ -674,6 +674,93 @@ class LeadDetailsPage extends StatelessWidget {
                       ),
                     );
                   }),
+                  Obx(() {
+                    final status = controller.selectedStatus.value;
+
+                    //  only show for HOT orders, adjust if needed
+                    if (status != "HOT") {
+                      return const SizedBox.shrink();
+                    }
+
+                    return FocusTraversalOrder(
+                      order: const NumericFocusOrder(11),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        child: InkWell(
+                          focusColor: Colors.transparent,
+                          onTap: () async {
+                            DateTime today = DateTime.now();
+                            DateTime onlyDate = DateTime(
+                              today.year,
+                              today.month,
+                              today.day,
+                            );
+
+                            DateTime? picked = await showDatePicker(
+                              context: context,
+                              initialDate:
+                                  controller.deliveryDate.value ?? onlyDate,
+                              firstDate: onlyDate,
+                              lastDate: DateTime(2035),
+                            );
+
+                            if (picked != null) {
+                              controller.deliveryDate.value = picked;
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF9FAFB),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: const Color(0xFFD1D5DB),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.local_shipping_outlined,
+                                  size: 20,
+                                  color: Color(0xFF6B7280),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    controller.deliveryDate.value == null
+                                        ? "Select Delivery Date"
+                                        : DateFormat('dd-MM-yyyy').format(
+                                            controller.deliveryDate.value!,
+                                          ),
+                                    style: GoogleFonts.k2d(
+                                      fontSize: 14,
+                                      color:
+                                          controller.deliveryDate.value == null
+                                          ? const Color(0xFF6B7280)
+                                          : const Color(0xFF111827),
+                                    ),
+                                  ),
+                                ),
+                                if (controller.deliveryDate.value != null)
+                                  GestureDetector(
+                                    onTap: () =>
+                                        controller.deliveryDate.value = null,
+                                    child: const Icon(
+                                      Icons.clear,
+                                      color: Color(0xFF9CA3AF),
+                                      size: 18,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
 
                   SizedBox(height: screenHeight * 0.024),
                   Row(

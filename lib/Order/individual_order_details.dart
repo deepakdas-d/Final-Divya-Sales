@@ -159,6 +159,22 @@ class IndividualOrderDetails extends StatelessWidget {
         transaction.update(productRef, {'stock': currentStock + currentNos});
       });
 
+      //   the maker's pendingOrders
+      final pendingRef = firestore.collection('users').doc(data['makerId']);
+
+      await firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(pendingRef);
+        if (!snapshot.exists) return;
+
+        final currentPending = (snapshot.data()?['pendingOrders'] ?? 0) as int;
+
+        final newPending = currentPending > 0 ? currentPending - 1 : 0;
+
+        transaction.set(pendingRef, {
+          'pendingOrders': newPending,
+        }, SetOptions(merge: true));
+      });
+
       // Decrement the user's totalOrders count
       final docRef1 = firestore.collection('users').doc(userId);
 

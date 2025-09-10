@@ -325,7 +325,7 @@ class LeadManagementController extends GetxController {
         'Oops!',
         'Please fill all required fields correctly',
         backgroundColor: Colors.white,
-        colorText: Color(0xFF014185),
+        colorText: const Color(0xFF014185),
       );
       return;
     }
@@ -342,7 +342,7 @@ class LeadManagementController extends GetxController {
           'Oops!',
           'Selected product not found',
           backgroundColor: Colors.white,
-          colorText: Color(0xFF014185),
+          colorText: const Color(0xFF014185),
         );
         return;
       }
@@ -360,19 +360,17 @@ class LeadManagementController extends GetxController {
           'Oops!',
           'Invalid number of items ordered',
           backgroundColor: Colors.white,
-          colorText: Color(0xFF014185),
+          colorText: const Color(0xFF014185),
         );
         return;
       }
 
-      // ✅ Update stock first
+      // ✅ Update stock
       if (currentStock > 0) {
-        // Only subtract if stock is positive
         final updatedStock = currentStock - orderedQuantity;
         await _firestore.collection('products').doc(docId).update({
           'stock': updatedStock,
         });
-        // Update local product stock map as well
         productStockMap[selectedProductId.value!] = updatedStock;
       }
 
@@ -383,12 +381,13 @@ class LeadManagementController extends GetxController {
           'Oops!',
           'User not logged in',
           backgroundColor: Colors.white,
-          colorText: Color(0xFF014185),
+          colorText: const Color(0xFF014185),
         );
         return;
       }
 
       final userId = currentUser.uid;
+      final makerId = selectedMakerId.value!;
       final customerId = await getOrCreateCustomerId(
         name: nameController.text,
         phone: phoneController.text,
@@ -402,7 +401,6 @@ class LeadManagementController extends GetxController {
         'customerId': customerId,
         'name': nameController.text,
         'place': "${districtController.text}, ${talukController.text}",
-
         'address': addressController.text,
         'phone1': phoneController.text,
         'phone2': phone2Controller.text.isNotEmpty
@@ -414,7 +412,7 @@ class LeadManagementController extends GetxController {
             ? remarkController.text
             : null,
         'status': selectedStatus.value,
-        'makerId': selectedMakerId.value,
+        'makerId': makerId,
         'followUpDate': followUpDate.value != null
             ? Timestamp.fromDate(followUpDate.value!)
             : null,
@@ -423,32 +421,46 @@ class LeadManagementController extends GetxController {
             : null,
         'salesmanID': userId,
         'createdAt': Timestamp.now(),
-        'order_status': "pending",
+        'order_status': "pending", // ✅ default status
         'cancel': false,
       });
-      final makerId = selectedMakerId.value;
 
-      await _firestore.collection('users').doc(userId).set({
-        'totalOrders': FieldValue.increment(1),
-      }, SetOptions(merge: true));
-      await _firestore.collection('users').doc(makerId).set({
-        'totalOrders': FieldValue.increment(1),
-      }, SetOptions(merge: true));
+      // ✅ Update user counts
+      // ✅ Update maker counts
+      Future<void> updateMakerCounts(String makerId) async {
+        await _firestore.collection('users').doc(makerId).set({
+          'totalOrders': FieldValue.increment(1),
+          'pendingOrders': FieldValue.increment(1),
+          'acceptedOrders': FieldValue.increment(0),
+          'deliveredOrders': FieldValue.increment(0),
+          'sent out for deliveryOrders': FieldValue.increment(0),
+        }, SetOptions(merge: true));
+      }
+
+      // ✅ Update salesman counts
+      Future<void> updateSalesmanCounts(String salesmanId) async {
+        await _firestore.collection('users').doc(salesmanId).set({
+          'totalOrders': FieldValue.increment(1),
+        }, SetOptions(merge: true));
+      }
+
+      await updateSalesmanCounts(userId); // ✅ only totalOrders
+      await updateMakerCounts(makerId);
 
       Get.snackbar(
         'Success',
         'Order placed successfully',
         backgroundColor: Colors.white,
-        colorText: Color(0xFF014185),
+        colorText: const Color(0xFF014185),
       );
       clearForm();
       Get.offAll(Home());
     } catch (e) {
       Get.snackbar(
         'Oops!',
-        'Cannot placing order: $e',
+        'Cannot place order: $e',
         backgroundColor: Colors.white,
-        colorText: Color(0xFF014185),
+        colorText: const Color(0xFF014185),
       );
     } finally {
       isOrdering.value = false;

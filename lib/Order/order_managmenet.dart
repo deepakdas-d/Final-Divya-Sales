@@ -468,7 +468,7 @@ class OrderManagement extends StatelessWidget {
     double screenWidth,
     double screenHeight,
   ) {
-    final isCancelled = data['Cancel'] == true;
+    final isCancelled = data['cancel'] == true;
     final statusColor = _getStatusColor(data['order_status']);
 
     return Container(

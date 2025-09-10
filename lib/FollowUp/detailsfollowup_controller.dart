@@ -32,6 +32,7 @@ class LeadDetailsController extends GetxController {
   final statusList = ['HOT', 'WARM', 'COOL'].obs;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   var productStockMap = <String, int>{}.obs;
+  var deliveryDate = Rxn<DateTime>();
 
   // New Rx variables for managing page state
   var isLoading = true.obs;
@@ -357,6 +358,68 @@ class LeadDetailsController extends GetxController {
     }
   }
 
+  Future<String> getOrCreateCustomerId({
+    required String name,
+    required String phone,
+    required String place,
+    required String address,
+  }) async {
+    try {
+      final snapshot = await _firestore
+          .collection('Customers')
+          .where('phone', isEqualTo: phone)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        // ✅ Return existing customerId
+        final existingCustomerId = snapshot.docs.first.data()['customerId'];
+        return existingCustomerId;
+      }
+
+      // ❌ No existing customer, create a new one
+      final newCustomerId = await generateCustomerId();
+      await _firestore.collection('Customers').add({
+        'customerId': newCustomerId,
+        'name': name,
+        'phone': phone,
+        'place': place,
+        'address': address,
+        'createdAt': Timestamp.now(),
+      });
+
+      return newCustomerId;
+    } catch (e) {
+      Get.snackbar(
+        'Oops!',
+        'Failed to get or create customer: $e',
+        backgroundColor: Colors.white,
+        colorText: Color(0xFF014185),
+      );
+      rethrow;
+    }
+  }
+
+  Future<String> generateCustomerId() async {
+    final snapshot = await _firestore
+        .collection('Customers')
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .get();
+
+    int lastNumber = 0;
+    if (snapshot.docs.isNotEmpty) {
+      final lastId = snapshot.docs.first.data()['customerId'] as String?;
+      if (lastId != null && lastId.startsWith('CUS')) {
+        final numberPart = int.tryParse(lastId.replaceAll('CUS', '')) ?? 0;
+        lastNumber = numberPart;
+      }
+    }
+
+    final newNumber = lastNumber + 1;
+    return 'CUS${newNumber.toString().padLeft(5, '0')}';
+  }
+
   Future<void> placeOrder(String leadDocId) async {
     if (!formKey.currentState!.validate() || selectedMakerId.value == null) {
       Get.snackbar(
@@ -420,6 +483,12 @@ class LeadDetailsController extends GetxController {
         );
         return;
       }
+      final customerId = await getOrCreateCustomerId(
+        name: nameController.text,
+        phone: phoneController.text,
+        place: placeController.text,
+        address: addressController.text,
+      );
 
       final userId = currentUser.uid;
 
@@ -443,8 +512,13 @@ class LeadDetailsController extends GetxController {
             ? Timestamp.fromDate(followUpDate.value!)
             : null,
         'salesmanID': userId,
+        'deliveryDate': deliveryDate.value != null
+            ? Timestamp.fromDate(deliveryDate.value!)
+            : null,
         'createdAt': Timestamp.now(),
         'order_status': "pending",
+        'cancel': false,
+        'customerId': customerId,
       });
       final makerId = selectedMakerId.value;
 
@@ -458,6 +532,7 @@ class LeadDetailsController extends GetxController {
       }, SetOptions(merge: true));
       await _firestore.collection('users').doc(makerId).set({
         'totalOrders': FieldValue.increment(1),
+        'pendingOrders': FieldValue.increment(1),
       }, SetOptions(merge: true));
 
       Get.snackbar(
