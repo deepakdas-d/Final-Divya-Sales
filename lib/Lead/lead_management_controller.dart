@@ -16,6 +16,7 @@ class LeadManagementController extends GetxController {
   final phone2Controller = TextEditingController();
   final nosController = TextEditingController();
   final remarkController = TextEditingController();
+  final TextEditingController searchController = TextEditingController();
 
   final formKey = GlobalKey<FormState>();
 
@@ -62,6 +63,13 @@ class LeadManagementController extends GetxController {
     return {'district': district, 'taluk': taluk};
   }
 
+  final scrollController = ScrollController();
+
+  RxBool showProductDropdown = false.obs;
+  RxBool isFetching = false.obs;
+  RxBool hasMore = true.obs;
+  DocumentSnapshot? _lastDocument; // For pagination
+
   @override
   void onInit() {
     super.onInit();
@@ -71,6 +79,13 @@ class LeadManagementController extends GetxController {
     selectedStatus.listen((status) {
       if (status == "HOT") {
         followUpDate.value = null; // Clear date if HOT is selected
+      }
+    });
+
+    scrollController.addListener(() {
+      if (scrollController.position.pixels >=
+          scrollController.position.maxScrollExtent - 200) {
+        fetchProducts();
       }
     });
   }
@@ -106,58 +121,70 @@ class LeadManagementController extends GetxController {
     }
   }
 
-  Future<void> fetchProducts() async {
+  Future<void> fetchProducts({int pageSize = 20}) async {
+    if (isFetching.value || !hasMore.value) return;
+
     try {
-      final snapshot = await _firestore.collection('products').get();
+      isFetching.value = true;
 
-      final products = <String>[];
-      final stockMap = <String, int>{};
+      Query query = FirebaseFirestore.instance
+          .collection('products')
+          .orderBy('id') // important for pagination
+          .limit(pageSize);
 
-      for (var doc in snapshot.docs) {
-        final id = doc.data()['id']?.toString() ?? doc.id;
-        final stock = doc.data()['stock'] ?? 0;
-        products.add(id);
-        stockMap[id] = stock;
+      if (_lastDocument != null) {
+        query = query.startAfterDocument(_lastDocument!);
       }
 
-      productIdList.assignAll(products);
-      productStockMap.assignAll(stockMap);
+      final snapshot = await query.get();
 
-      debugPrint('Fetched product IDs: $products');
-      debugPrint('Fetched product stock: $stockMap');
+      if (snapshot.docs.isNotEmpty) {
+        for (var doc in snapshot.docs) {
+          final data = doc.data() as Map<String, dynamic>?; // null safe
+          if (data == null) continue;
+
+          final id = data['id']?.toString() ?? doc.id;
+          final stock = data['stock'] ?? 0;
+
+          if (!productIdList.contains(id)) productIdList.add(id);
+          productStockMap[id] = stock;
+        }
+        _lastDocument = snapshot.docs.last;
+      }
+
+      if (snapshot.docs.length < pageSize) {
+        hasMore.value = false;
+      }
     } catch (e) {
       Get.snackbar(
         'Oops!',
         'Error fetching products: $e',
         backgroundColor: Colors.red,
-        colorText: Color(0xFF014185),
+        colorText: const Color(0xFF014185),
       );
+    } finally {
+      isFetching.value = false;
     }
   }
 
   Future<void> fetchProductImage(String productId) async {
+    if (productImageMap.containsKey(productId)) return;
+
     try {
-      final querySnapshot = await _firestore
+      final querySnapshot = await FirebaseFirestore.instance
           .collection('products')
           .where('id', isEqualTo: productId)
           .limit(1)
           .get();
 
       if (querySnapshot.docs.isEmpty) {
-        productImageMap[productId] = ''; // cache empty
+        productImageMap[productId] = '';
         return;
       }
 
-      final doc = querySnapshot.docs.first;
-      final data = doc.data();
-      final imageUrl = data['imageUrl'] as String?;
-
-      // 🔹 Only cache in map, do NOT update productImageUrl here
-      if (imageUrl != null && imageUrl.isNotEmpty) {
-        productImageMap[productId] = imageUrl;
-      } else {
-        productImageMap[productId] = '';
-      }
+      final data = querySnapshot.docs.first.data() as Map<String, dynamic>?;
+      final imageUrl = data?['imageUrl'] as String?;
+      productImageMap[productId] = imageUrl ?? '';
     } catch (e) {
       productImageMap[productId] = '';
     }
@@ -580,6 +607,7 @@ class LeadManagementController extends GetxController {
     selectedMakerId.value = null; // Reset maker selection
     followUpDate.value = null;
     productImageUrl.value = null;
+    searchController.clear();
   }
 
   String? validateName(String? value) {
@@ -648,6 +676,7 @@ class LeadManagementController extends GetxController {
     phone2Controller.dispose();
     nosController.dispose();
     remarkController.dispose();
+    searchController.dispose();
     super.onClose();
   }
 }

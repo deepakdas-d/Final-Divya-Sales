@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:sales/Lead/lead_management_controller.dart';
+import 'package:shimmer/shimmer.dart';
 
 class LeadManagement extends StatelessWidget {
   const LeadManagement({super.key});
@@ -98,17 +99,15 @@ class LeadManagement extends StatelessWidget {
                 }),
                 SizedBox(height: screenHeight * 0.016),
 
-                FocusTraversalOrder(
-                  order: const NumericFocusOrder(2),
-                  child: buildTextField(
-                    context,
-                    "Address",
-                    controller: controller.addressController,
-                    validator: controller.validateAddress,
-                    icon: Icons.home_outlined,
-                    maxLines: 2,
-                    textInputAction: TextInputAction.next,
-                  ),
+                buildTextField(
+                  context,
+                  "Address",
+                  controller: controller.addressController,
+                  validator: controller.validateAddress,
+                  icon: Icons.home_outlined,
+                  maxLines: 3, // allow unlimited lines
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
                 ),
 
                 // Contact Information Section
@@ -149,102 +148,44 @@ class LeadManagement extends StatelessWidget {
 
                 FocusTraversalOrder(
                   order: const NumericFocusOrder(5),
-                  child: Obx(
-                    () => buildDropdownField(
-                      context,
-                      label: "Select Product",
-                      value: controller.selectedProductId.value,
-                      items: [
-                        const DropdownMenuItem<String>(
-                          value: null,
-                          child: Text("-- Select Product --"),
-                        ),
-                        ...controller.productIdList.map((item) {
-                          // Trigger fetch if image not cached yet
-                          if (!controller.productImageMap.containsKey(item)) {
-                            controller.fetchProductImage(item);
-                          }
-
-                          return DropdownMenuItem(
-                            value: item,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior
-                                  .translucent, // allow taps to pass to parent
-                              onLongPress: () {
-                                final imageUrl = controller.getProductImage(
-                                  item,
-                                );
-                                if (imageUrl.isNotEmpty) {
-                                  Get.dialog(
-                                    Dialog(
-                                      child: InteractiveViewer(
-                                        child: CachedNetworkImage(
-                                          imageUrl: imageUrl,
-                                          fit: BoxFit.contain,
-                                          placeholder: (_, __) => const Center(
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          ),
-                                          errorWidget: (_, __, ___) =>
-                                              const Icon(Icons.broken_image),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                }
-                              },
-                              child: Row(
-                                children: [
-                                  CachedNetworkImage(
-                                    imageUrl: controller.getProductImage(item),
-                                    width: 40,
-                                    height: 40,
-                                    fit: BoxFit.cover,
-                                    placeholder: (_, __) => const SizedBox(
-                                      width: 40,
-                                      height: 40,
-                                      child: Center(
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      ),
-                                    ),
-                                    errorWidget: (_, __, ___) =>
-                                        const Icon(Icons.broken_image),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(child: Text(item)),
-                                ],
-                              ),
+                  child: Obx(() {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Modal trigger header
+                        GestureDetector(
+                          onTap: () {
+                            _showProductSelectionModal(context, controller);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 16,
                             ),
-                          );
-                        }),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  (controller.selectedProductId.value == null ||
+                                          controller
+                                              .selectedProductId
+                                              .value!
+                                              .isEmpty)
+                                      ? "-- Select Product --"
+                                      : controller.selectedProductId.value!,
+                                ),
+                                const Icon(Icons.arrow_drop_down),
+                              ],
+                            ),
+                          ),
+                        ),
                       ],
-                      onChanged: (value) {
-                        controller.selectedProductId.value = value;
-                        if (value != null) {
-                          // Only update the displayed image when user selects
-                          controller.productImageUrl.value =
-                              controller.productImageMap[value] ?? '';
-                          // Optionally fetch full image if not cached
-                          if (!(controller.productImageMap.containsKey(
-                            value,
-                          ))) {
-                            controller.fetchProductImage(value).then((_) {
-                              controller.productImageUrl.value =
-                                  controller.productImageMap[value] ?? '';
-                            });
-                          }
-                        } else {
-                          controller.productImageUrl.value = null;
-                        }
-                      },
-                      validator: (value) =>
-                          value == null ? 'Product is required' : null,
-                      icon: Icons.inventory_2_outlined,
-                    ),
-                  ),
+                    );
+                  }),
                 ),
 
                 SizedBox(height: screenHeight * 0.016),
@@ -799,319 +740,687 @@ class LeadManagement extends StatelessWidget {
     );
   }
 
-  Widget buildSectionTitle(String title, context) {
-    final screenHeight = MediaQuery.of(context).size.height;
+  void _showProductSelectionModal(BuildContext context, dynamic controller) {
+    var isInitialLoading = true.obs;
+    var searchQuery = ''.obs; // Reactive search query
+    var filteredProductList = <String>[].obs; // Reactive filtered list
 
-    return Text(
-      title,
-      style: GoogleFonts.k2d(
-        fontSize: screenHeight * 0.018,
-        fontWeight: FontWeight.w600,
-        color: Color(0xFF111827),
-        letterSpacing: 0.3,
+    // Initialize filtered list and prefetch images
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (controller.productIdList.isEmpty) {
+        await controller.fetchProducts();
+      }
+      if (controller.productIdList.isNotEmpty) {
+        filteredProductList.assignAll(
+          controller.productIdList.where((item) => item != null).toList(),
+        );
+        final itemsToPrefetch = controller.productIdList
+            .take(5)
+            .where(
+              (item) =>
+                  item != null && !controller.productImageMap.containsKey(item),
+            )
+            .toList();
+        for (var item in itemsToPrefetch) {
+          await controller.fetchProductImage(item);
+        }
+        isInitialLoading.value = false;
+      } else {
+        isInitialLoading.value = false;
+      }
+    });
+
+    // Update filtered list when search query changes
+    ever(searchQuery, (String query) {
+      print('Search query: $query'); // Debug
+      if (query.isEmpty) {
+        filteredProductList.assignAll(
+          controller.productIdList.where((item) => item != null).toList(),
+        );
+      } else {
+        filteredProductList.assignAll(
+          controller.productIdList
+              .where(
+                (item) =>
+                    item != null &&
+                    item.toString().toLowerCase().contains(query.toLowerCase()),
+              )
+              .toList(),
+        );
+      }
+      print('Filtered list length: ${filteredProductList.length}'); // Debug
+    });
+
+    // Sync controller.searchController with searchQuery
+    controller.searchController?.addListener(() {
+      if (controller.searchController != null) {
+        searchQuery.value = controller.searchController.text;
+      }
+    });
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-    );
-  }
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => FocusTraversalOrder(
+          order: const NumericFocusOrder(5),
+          child: Obx(
+            () => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Modal header
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        controller.selectedProductId?.value?.isEmpty ?? true
+                            ? "Select Product"
+                            : controller.selectedProductId!.value ?? "",
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          controller.searchController?.clear();
+                          searchQuery.value = '';
+                          Navigator.pop(context);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                // Search bar
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: TextField(
+                    controller: controller.searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search products...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: Obx(
+                        () => searchQuery.value.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  controller.searchController?.clear();
+                                  searchQuery.value = '';
+                                },
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[100],
+                    ),
+                    onChanged: (value) {
+                      searchQuery.value = value; // Update reactively
+                    },
+                  ),
+                ),
+                const Divider(height: 1),
+                // Shimmer or product list
+                if (isInitialLoading.value)
+                  Expanded(
+                    child: ListView.builder(
+                      controller: scrollController,
+                      itemCount: 10,
+                      itemBuilder: (context, index) => Shimmer.fromColors(
+                        baseColor: Colors.grey[300]!,
+                        highlightColor: Colors.grey[100]!,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 8,
+                            horizontal: 12,
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Container(
+                                  height: 20,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: filteredProductList.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No products found',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          )
+                        : NotificationListener<ScrollNotification>(
+                            onNotification: (notification) {
+                              if (notification.metrics.pixels >=
+                                      notification.metrics.maxScrollExtent -
+                                          100 &&
+                                  !controller.isFetching.value &&
+                                  controller.hasMore.value) {
+                                controller.fetchProducts();
+                              }
+                              return false;
+                            },
+                            child: ListView.builder(
+                              controller: scrollController,
+                              itemCount:
+                                  filteredProductList.length +
+                                  (controller.hasMore.value ? 1 : 0),
+                              itemBuilder: (context, index) {
+                                if (index == filteredProductList.length) {
+                                  return const Padding(
+                                    padding: EdgeInsets.all(16),
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  );
+                                }
 
-  Widget buildStockStatus(
-    String productId,
-    double screenHeight,
-    dynamic controller,
-  ) {
-    final stock = controller.productStockMap[productId] ?? 0;
+                                final item = filteredProductList[index];
 
-    String statusText;
-    Color statusColor;
-    IconData statusIcon;
+                                if (!controller.productImageMap.containsKey(
+                                  item,
+                                )) {
+                                  controller.fetchProductImage(item);
+                                }
 
-    if (stock > 10) {
-      statusText = '$stock in Stock';
-      statusColor = const Color(0xFF10B981);
-      statusIcon = Icons.check_circle_outline;
-    } else if (stock > 0) {
-      statusText = 'Only $stock left!';
-      statusColor = const Color(0xFFF59E0B);
-      statusIcon = Icons.warning_amber_outlined;
-    } else {
-      statusText = 'Out of Stock';
-      statusColor = const Color(0xFFEF4444);
-      statusIcon = Icons.error_outline;
-    }
+                                final imageUrl = controller.getProductImage(
+                                  item,
+                                );
+                                final hasImage = imageUrl.isNotEmpty;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: statusColor.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: statusColor.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(statusIcon, color: statusColor, size: 18),
-          const SizedBox(width: 8),
-          Text(
-            statusText,
-            style: GoogleFonts.k2d(
-              fontSize: screenHeight * 0.018,
-
-              fontWeight: FontWeight.w500,
-              color: statusColor,
+                                return GestureDetector(
+                                  onTap: () {
+                                    controller.selectedProductId.value = item;
+                                    controller.productImageUrl.value = imageUrl;
+                                    searchQuery.value = '';
+                                    Navigator.pop(context);
+                                  },
+                                  onLongPress: () {
+                                    if (hasImage) {
+                                      Get.dialog(
+                                        Dialog(
+                                          child: InteractiveViewer(
+                                            child: CachedNetworkImage(
+                                              imageUrl: imageUrl,
+                                              fit: BoxFit.contain,
+                                              placeholder: (_, __) =>
+                                                  const Center(
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                        ),
+                                                  ),
+                                              errorWidget: (_, __, ___) =>
+                                                  const Icon(
+                                                    Icons.broken_image,
+                                                  ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                      horizontal: 12,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        hasImage
+                                            ? CachedNetworkImage(
+                                                imageUrl: imageUrl,
+                                                width: 40,
+                                                height: 40,
+                                                fit: BoxFit.cover,
+                                                placeholder: (_, __) =>
+                                                    Shimmer.fromColors(
+                                                      baseColor:
+                                                          Colors.grey[300]!,
+                                                      highlightColor:
+                                                          Colors.grey[100]!,
+                                                      child: Container(
+                                                        width: 40,
+                                                        height: 40,
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                errorWidget: (_, __, ___) =>
+                                                    const Icon(
+                                                      Icons.broken_image,
+                                                    ),
+                                              )
+                                            : Shimmer.fromColors(
+                                                baseColor: Colors.grey[300]!,
+                                                highlightColor:
+                                                    Colors.grey[100]!,
+                                                child: Container(
+                                                  width: 40,
+                                                  height: 40,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                        const SizedBox(width: 8),
+                                        Expanded(child: Text(item)),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                  ),
+              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget buildTextField(
-    context,
-    String label, {
-    TextEditingController? controller,
-    String? Function(String?)? validator,
-    IconData? icon,
-    TextInputType? keyboardType,
-    int maxLines = 1,
-    TextInputAction? textInputAction,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: TextFormField(
-        controller: controller,
-        validator: validator,
-        keyboardType: keyboardType,
-        maxLines: maxLines,
-        textInputAction: textInputAction ?? TextInputAction.next,
-        style: GoogleFonts.k2d(
-          fontSize: MediaQuery.of(context).size.height * 0.017,
-          color: Color(0xFF111827),
-        ),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: GoogleFonts.k2d(fontSize: 14, color: Color(0xFF6B7280)),
-          prefixIcon: icon != null
-              ? Icon(icon, size: 20, color: const Color(0xFF6B7280))
-              : null,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 12,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 2),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFEF4444)),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
-          ),
-          filled: true,
-          fillColor: const Color(0xFFF9FAFB),
         ),
       ),
-    );
+    ).whenComplete(() {
+      controller.searchController?.clear();
+      searchQuery.value = '';
+      controller.showProductDropdown.value = false;
+    });
+  }
+}
+
+Widget buildSectionTitle(String title, context) {
+  final screenHeight = MediaQuery.of(context).size.height;
+
+  return Text(
+    title,
+    style: GoogleFonts.k2d(
+      fontSize: screenHeight * 0.018,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF111827),
+      letterSpacing: 0.3,
+    ),
+  );
+}
+
+Widget buildStockStatus(
+  String productId,
+  double screenHeight,
+  dynamic controller,
+) {
+  final stock = controller.productStockMap[productId] ?? 0;
+
+  String statusText;
+  Color statusColor;
+  IconData statusIcon;
+
+  if (stock > 10) {
+    statusText = '$stock in Stock';
+    statusColor = const Color(0xFF10B981);
+    statusIcon = Icons.check_circle_outline;
+  } else if (stock > 0) {
+    statusText = 'Only $stock left!';
+    statusColor = const Color(0xFFF59E0B);
+    statusIcon = Icons.warning_amber_outlined;
+  } else {
+    statusText = 'Out of Stock';
+    statusColor = const Color(0xFFEF4444);
+    statusIcon = Icons.error_outline;
   }
 
-  Widget buildDropdownField<T>(
-    BuildContext context, {
-    required String label,
-    required T? value,
-    required List<DropdownMenuItem<T>> items,
-    required void Function(T?)? onChanged,
-    String? Function(T?)? validator,
-    IconData? icon,
-    bool isEnabled = true,
-    String? disabledHint,
-    bool isExpanded = true,
-  }) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+  return Container(
+    margin: const EdgeInsets.symmetric(vertical: 12),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: statusColor.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: statusColor.withOpacity(0.3)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(statusIcon, color: statusColor, size: 18),
+        const SizedBox(width: 8),
+        Text(
+          statusText,
+          style: GoogleFonts.k2d(
+            fontSize: screenHeight * 0.018,
 
-    final fontSize = screenHeight * 0.017;
-    final labelFontSize = screenHeight * 0.018;
-    final iconSize = screenHeight * 0.025;
-    final verticalPadding = screenHeight * 0.015;
-    final horizontalPadding = screenWidth * 0.04;
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: screenHeight * 0.02),
-      child: DropdownButtonFormField<T>(
-        value: value,
-        items: items,
-        onChanged: isEnabled ? onChanged : null,
-        validator: validator,
-        style: GoogleFonts.k2d(
-          fontSize: fontSize,
-          color: isEnabled ? const Color(0xFF111827) : const Color(0xFF9CA3AF),
+            fontWeight: FontWeight.w500,
+            color: statusColor,
+          ),
         ),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: GoogleFonts.k2d(
-            fontSize: labelFontSize,
+      ],
+    ),
+  );
+}
+
+Widget buildTextField(
+  context,
+  String label, {
+  TextEditingController? controller,
+  String? Function(String?)? validator,
+  IconData? icon,
+  TextInputType? keyboardType,
+  int maxLines = 1,
+  TextInputAction? textInputAction,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 16),
+    child: TextFormField(
+      controller: controller,
+      validator: validator,
+      keyboardType: keyboardType,
+      maxLines: maxLines,
+      textInputAction: textInputAction ?? TextInputAction.next,
+      style: GoogleFonts.k2d(
+        fontSize: MediaQuery.of(context).size.height * 0.017,
+        color: Color(0xFF111827),
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: GoogleFonts.k2d(fontSize: 14, color: Color(0xFF6B7280)),
+        prefixIcon: icon != null
+            ? Icon(icon, size: 20, color: const Color(0xFF6B7280))
+            : null,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 12,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFEF4444)),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
+        ),
+        filled: true,
+        fillColor: const Color(0xFFF9FAFB),
+      ),
+    ),
+  );
+}
+
+Widget buildDropdownField<T>(
+  BuildContext context, {
+  required String label,
+  required T? value,
+  required List<DropdownMenuItem<T>> items,
+  required void Function(T?)? onChanged,
+  String? Function(T?)? validator,
+  IconData? icon,
+  bool isEnabled = true,
+  String? disabledHint,
+  bool isExpanded = true,
+}) {
+  final screenHeight = MediaQuery.of(context).size.height;
+  final screenWidth = MediaQuery.of(context).size.width;
+
+  final fontSize = screenHeight * 0.017;
+  final labelFontSize = screenHeight * 0.018;
+  final iconSize = screenHeight * 0.025;
+  final verticalPadding = screenHeight * 0.015;
+  final horizontalPadding = screenWidth * 0.04;
+
+  return Padding(
+    padding: EdgeInsets.only(bottom: screenHeight * 0.02),
+    child: DropdownButtonFormField<T>(
+      value: value,
+      items: items,
+      onChanged: isEnabled ? onChanged : null,
+      validator: validator,
+      style: GoogleFonts.k2d(
+        fontSize: fontSize,
+        color: isEnabled ? const Color(0xFF111827) : const Color(0xFF9CA3AF),
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: GoogleFonts.k2d(
+          fontSize: labelFontSize,
+          color: isEnabled ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+        ),
+        prefixIcon: icon != null
+            ? Icon(
+                icon,
+                size: iconSize,
+                color: isEnabled
+                    ? const Color(0xFF6B7280)
+                    : const Color(0xFF9CA3AF),
+              )
+            : null,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: horizontalPadding,
+          vertical: verticalPadding,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(
             color: isEnabled
-                ? const Color(0xFF6B7280)
-                : const Color(0xFF9CA3AF),
+                ? const Color(0xFFD1D5DB)
+                : const Color(0xFFE5E7EB),
           ),
-          prefixIcon: icon != null
-              ? Icon(
-                  icon,
-                  size: iconSize,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFEF4444)),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
+        ),
+        filled: true,
+        fillColor: isEnabled
+            ? const Color(0xFFF9FAFB)
+            : const Color(0xFFF3F4F6),
+      ),
+      disabledHint: disabledHint != null
+          ? Text(
+              disabledHint,
+              style: GoogleFonts.k2d(
+                fontSize: fontSize,
+                color: const Color(0xFF9CA3AF),
+              ),
+            )
+          : null,
+      dropdownColor: Colors.white,
+      elevation: 4,
+      borderRadius: BorderRadius.circular(8),
+      isExpanded: isExpanded,
+    ),
+  );
+}
+
+Widget buildDropdownWithOtherField<T>(
+  BuildContext context, {
+  required String label,
+  required TextEditingController controller,
+  required T? value,
+  required List<T> items,
+  required void Function(T?) onChanged,
+  String? Function(T?)? validator,
+  IconData? icon,
+  bool isEnabled = true,
+  bool isExpanded = true,
+  String otherLabel = 'OTHERS',
+  double order = 1, // For FocusTraversalOrder
+}) {
+  final screenHeight = MediaQuery.of(context).size.height;
+  final screenWidth = MediaQuery.of(context).size.width;
+
+  final fontSize = screenHeight * 0.017;
+  final labelFontSize = screenHeight * 0.018;
+  final iconSize = screenHeight * 0.025;
+  final verticalPadding = screenHeight * 0.015;
+  final horizontalPadding = screenWidth * 0.04;
+
+  // Combine items + Other option
+  final List<T> finalItems = [...items, otherLabel as T];
+
+  return FocusTraversalOrder(
+    order: NumericFocusOrder(order),
+    child: StatefulBuilder(
+      builder: (context, setState) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DropdownButtonFormField<T>(
+              value: value,
+              items: finalItems
+                  .map(
+                    (item) => DropdownMenuItem<T>(
+                      value: item,
+                      child: Text(item.toString()),
+                    ),
+                  )
+                  .toList(),
+              onChanged: isEnabled
+                  ? (val) {
+                      setState(() {
+                        onChanged(val);
+                        if (val?.toString() != otherLabel) {
+                          controller.text = val?.toString() ?? '';
+                        } else {
+                          controller.clear();
+                        }
+                      });
+                    }
+                  : null,
+              validator: (val) {
+                if (val == null) {
+                  return 'Please select ${label.toLowerCase()}';
+                }
+                if (val.toString() == otherLabel &&
+                    (controller.text.trim().isEmpty)) {
+                  return 'Please enter ${label.toLowerCase()}';
+                }
+                return null;
+              },
+
+              style: GoogleFonts.k2d(
+                fontSize: fontSize,
+                color: isEnabled
+                    ? const Color(0xFF111827)
+                    : const Color(0xFF9CA3AF),
+              ),
+              decoration: InputDecoration(
+                labelText: label,
+                labelStyle: GoogleFonts.k2d(
+                  fontSize: labelFontSize,
                   color: isEnabled
                       ? const Color(0xFF6B7280)
                       : const Color(0xFF9CA3AF),
-                )
-              : null,
-          contentPadding: EdgeInsets.symmetric(
-            horizontal: horizontalPadding,
-            vertical: verticalPadding,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(
-              color: isEnabled
-                  ? const Color(0xFFD1D5DB)
-                  : const Color(0xFFE5E7EB),
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 2),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFEF4444)),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
-          ),
-          filled: true,
-          fillColor: isEnabled
-              ? const Color(0xFFF9FAFB)
-              : const Color(0xFFF3F4F6),
-        ),
-        disabledHint: disabledHint != null
-            ? Text(
-                disabledHint,
-                style: GoogleFonts.k2d(
-                  fontSize: fontSize,
-                  color: const Color(0xFF9CA3AF),
                 ),
-              )
-            : null,
-        dropdownColor: Colors.white,
-        elevation: 4,
-        borderRadius: BorderRadius.circular(8),
-        isExpanded: isExpanded,
-      ),
-    );
-  }
-
-  Widget buildDropdownWithOtherField<T>(
-    BuildContext context, {
-    required String label,
-    required TextEditingController controller,
-    required T? value,
-    required List<T> items,
-    required void Function(T?) onChanged,
-    String? Function(T?)? validator,
-    IconData? icon,
-    bool isEnabled = true,
-    bool isExpanded = true,
-    String otherLabel = 'OTHERS',
-    double order = 1, // For FocusTraversalOrder
-  }) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-
-    final fontSize = screenHeight * 0.017;
-    final labelFontSize = screenHeight * 0.018;
-    final iconSize = screenHeight * 0.025;
-    final verticalPadding = screenHeight * 0.015;
-    final horizontalPadding = screenWidth * 0.04;
-
-    // Combine items + Other option
-    final List<T> finalItems = [...items, otherLabel as T];
-
-    return FocusTraversalOrder(
-      order: NumericFocusOrder(order),
-      child: StatefulBuilder(
-        builder: (context, setState) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              DropdownButtonFormField<T>(
-                value: value,
-                items: finalItems
-                    .map(
-                      (item) => DropdownMenuItem<T>(
-                        value: item,
-                        child: Text(item.toString()),
-                      ),
-                    )
-                    .toList(),
-                onChanged: isEnabled
-                    ? (val) {
-                        setState(() {
-                          onChanged(val);
-                          if (val?.toString() != otherLabel) {
-                            controller.text = val?.toString() ?? '';
-                          } else {
-                            controller.clear();
-                          }
-                        });
-                      }
+                prefixIcon: icon != null
+                    ? Icon(
+                        icon,
+                        size: iconSize,
+                        color: isEnabled
+                            ? const Color(0xFF6B7280)
+                            : const Color(0xFF9CA3AF),
+                      )
                     : null,
-                validator: (val) {
-                  if (val == null) {
-                    return 'Please select ${label.toLowerCase()}';
-                  }
-                  if (val.toString() == otherLabel &&
-                      (controller.text.trim().isEmpty)) {
-                    return 'Please enter ${label.toLowerCase()}';
-                  }
-                  return null;
-                },
-
-                style: GoogleFonts.k2d(
-                  fontSize: fontSize,
-                  color: isEnabled
-                      ? const Color(0xFF111827)
-                      : const Color(0xFF9CA3AF),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: verticalPadding,
                 ),
-                decoration: InputDecoration(
-                  labelText: label,
-                  labelStyle: GoogleFonts.k2d(
-                    fontSize: labelFontSize,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(
                     color: isEnabled
-                        ? const Color(0xFF6B7280)
-                        : const Color(0xFF9CA3AF),
+                        ? const Color(0xFFD1D5DB)
+                        : const Color(0xFFE5E7EB),
                   ),
-                  prefixIcon: icon != null
-                      ? Icon(
-                          icon,
-                          size: iconSize,
-                          color: isEnabled
-                              ? const Color(0xFF6B7280)
-                              : const Color(0xFF9CA3AF),
-                        )
-                      : null,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(
+                    color: Color(0xFF3B82F6),
+                    width: 2,
+                  ),
+                ),
+                errorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFEF4444)),
+                ),
+                focusedErrorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(
+                    color: Color(0xFFEF4444),
+                    width: 2,
+                  ),
+                ),
+                filled: true,
+                fillColor: isEnabled
+                    ? const Color(0xFFF9FAFB)
+                    : const Color(0xFFF3F4F6),
+              ),
+              dropdownColor: Colors.white,
+              elevation: 4,
+              borderRadius: BorderRadius.circular(8),
+              isExpanded: isExpanded,
+            ),
+            const SizedBox(height: 8),
+            if (value?.toString() == otherLabel)
+              TextFormField(
+                controller: controller,
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(
+                  labelText: 'Enter $label',
+                  labelStyle: GoogleFonts.k2d(fontSize: labelFontSize),
+                  prefixIcon: const Icon(Icons.edit, size: 20),
                   contentPadding: EdgeInsets.symmetric(
                     horizontal: horizontalPadding,
                     vertical: verticalPadding,
@@ -1120,129 +1429,74 @@ class LeadManagement extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                     borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
                   ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: isEnabled
-                          ? const Color(0xFFD1D5DB)
-                          : const Color(0xFFE5E7EB),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                      color: Color(0xFF3B82F6),
-                      width: 2,
-                    ),
-                  ),
-                  errorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFEF4444)),
-                  ),
-                  focusedErrorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                      color: Color(0xFFEF4444),
-                      width: 2,
-                    ),
-                  ),
-                  filled: true,
-                  fillColor: isEnabled
-                      ? const Color(0xFFF9FAFB)
-                      : const Color(0xFFF3F4F6),
                 ),
-                dropdownColor: Colors.white,
-                elevation: 4,
-                borderRadius: BorderRadius.circular(8),
-                isExpanded: isExpanded,
+                validator: (val) {
+                  if (value?.toString() == otherLabel && val!.trim().isEmpty) {
+                    return 'Please enter $label';
+                  }
+                  return null;
+                },
               ),
-              const SizedBox(height: 8),
-              if (value?.toString() == otherLabel)
-                TextFormField(
-                  controller: controller,
-                  textInputAction: TextInputAction.next,
-                  decoration: InputDecoration(
-                    labelText: 'Enter $label',
-                    labelStyle: GoogleFonts.k2d(fontSize: labelFontSize),
-                    prefixIcon: const Icon(Icons.edit, size: 20),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: horizontalPadding,
-                      vertical: verticalPadding,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
-                    ),
-                  ),
-                  validator: (val) {
-                    if (value?.toString() == otherLabel &&
-                        val!.trim().isEmpty) {
-                      return 'Please enter $label';
-                    }
-                    return null;
-                  },
-                ),
-            ],
-          );
-        },
-      ),
-    );
-  }
+          ],
+        );
+      },
+    ),
+  );
+}
 
-  Widget buildTextFieldForNumber(
-    context,
-    String label, {
-    TextEditingController? controller,
-    String? Function(String?)? validator,
-    TextInputAction? textInputAction,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: TextFormField(
-        keyboardType: TextInputType.number,
-        controller: controller,
-        validator: validator,
-        textInputAction: textInputAction ?? TextInputAction.next,
-        style: GoogleFonts.k2d(
-          fontSize: MediaQuery.of(context).size.height * 0.016,
-          color: Color(0xFF111827),
-        ),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: GoogleFonts.k2d(fontSize: 14, color: Color(0xFF6B7280)),
-          prefixIcon: const Icon(
-            Icons.numbers_outlined,
-            size: 20,
-            color: Color(0xFF6B7280),
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 12,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 2),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFEF4444)),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
-          ),
-          filled: true,
-          fillColor: const Color(0xFFF9FAFB),
-        ),
+Widget buildTextFieldForNumber(
+  context,
+  String label, {
+  TextEditingController? controller,
+  String? Function(String?)? validator,
+  TextInputAction? textInputAction,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 16),
+    child: TextFormField(
+      keyboardType: TextInputType.number,
+      controller: controller,
+      validator: validator,
+      textInputAction: textInputAction ?? TextInputAction.next,
+      style: GoogleFonts.k2d(
+        fontSize: MediaQuery.of(context).size.height * 0.016,
+        color: Color(0xFF111827),
       ),
-    );
-  }
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: GoogleFonts.k2d(fontSize: 14, color: Color(0xFF6B7280)),
+        prefixIcon: const Icon(
+          Icons.numbers_outlined,
+          size: 20,
+          color: Color(0xFF6B7280),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 12,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF3B82F6), width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFEF4444)),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFFEF4444), width: 2),
+        ),
+        filled: true,
+        fillColor: const Color(0xFFF9FAFB),
+      ),
+    ),
+  );
 }
