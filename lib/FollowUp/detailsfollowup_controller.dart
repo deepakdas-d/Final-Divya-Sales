@@ -64,12 +64,20 @@ class LeadDetailsController extends GetxController {
         followUpDate.value = null;
       }
     });
+    //count for UI display
+    log("Current Lead Doc ID: $leadId");
+
     if (leadId != null) {
-      fetchFollowUpCount(leadId!);
+      log("Current Lead Doc ID: $leadId");
+      _loadFollowUpCount();
     }
-    log(
-      "log from init Follow up Count is:$followUpCount",
-    ); //count for UI display
+  }
+
+  Future<void> _loadFollowUpCount() async {
+    log("➡️ Loading followUpCount for $leadId");
+    final count = await fetchFollowUpCount(leadId!);
+    followUpCount.value = count; // 🔥 assign here
+    log("✅ Updated followUpCount.value = ${followUpCount.value}");
   }
 
   // Method to fetch and populate lead details for an existing lead
@@ -96,6 +104,7 @@ class LeadDetailsController extends GetxController {
         selectedProductId.value = data['productID'] as String?;
         selectedStatus.value = data['status'] as String?;
         selectedMakerId.value = data['makerId'] as String?;
+        followUpCount.value = data['followUpCount'] ?? 0;
 
         if (data['followUpDate'] != null) {
           followUpDate.value = (data['followUpDate'] as Timestamp).toDate();
@@ -184,8 +193,8 @@ class LeadDetailsController extends GetxController {
       productIdList.assignAll(products);
       productStockMap.assignAll(stockMap);
 
-      debugPrint('Fetched product IDs: $products');
-      debugPrint('Fetched product stock: $stockMap');
+      // debugPrint('Fetched product IDs: $products');
+      // debugPrint('Fetched product stock: $stockMap');
     } catch (e) {
       Get.snackbar(
         'Oops!',
@@ -346,8 +355,6 @@ class LeadDetailsController extends GetxController {
         if (currentLeadDoc.exists) {
           // Increment the existing count
           newFollowUpCount = (currentLeadDoc.data()?['followUpCount'] ?? 0) + 1;
-          followUpCount.value = await fetchFollowUpCount(_currentLeadDocId!);
-          log("Follow up Count is:$followUpCount"); //count for UI display
         }
       }
 
@@ -378,6 +385,7 @@ class LeadDetailsController extends GetxController {
       };
 
       if (isUpdateMode.value && _currentLeadDocId != null) {
+        log('Updating lead with data: $_currentLeadDocId');
         // Update existing lead
         await _firestore
             .collection('Leads')
