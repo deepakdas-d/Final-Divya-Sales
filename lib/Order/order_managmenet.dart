@@ -70,6 +70,8 @@ class OrderManagement extends StatelessWidget {
       padding: EdgeInsets.all(screenWidth * 0.04),
       child: TextField(
         controller: controller.searchController,
+        onChanged: (_) =>
+            controller.onSearchChanged(), // ✅ use controller’s function
         decoration: InputDecoration(
           hintText: 'Search orders...',
           hintStyle: TextStyle(fontSize: screenHeight * 0.016),
@@ -78,7 +80,10 @@ class OrderManagement extends StatelessWidget {
             () => controller.searchQuery.isNotEmpty
                 ? IconButton(
                     icon: const Icon(Icons.clear),
-                    onPressed: controller.clearSearch,
+                    onPressed: () {
+                      controller.clearSearch();
+                      controller.loadInitialItems(); // ✅ reload Firestore query
+                    },
                   )
                 : const SizedBox.shrink(),
           ),

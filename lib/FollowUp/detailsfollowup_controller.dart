@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -33,6 +35,7 @@ class LeadDetailsController extends GetxController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   var productStockMap = <String, int>{}.obs;
   var deliveryDate = Rxn<DateTime>();
+  RxInt followUpCount = 0.obs;
 
   // New Rx variables for managing page state
   var isLoading = true.obs;
@@ -61,6 +64,12 @@ class LeadDetailsController extends GetxController {
         followUpDate.value = null;
       }
     });
+    if (leadId != null) {
+      fetchFollowUpCount(leadId!);
+    }
+    log(
+      "log from init Follow up Count is:$followUpCount",
+    ); //count for UI display
   }
 
   // Method to fetch and populate lead details for an existing lead
@@ -240,6 +249,41 @@ class LeadDetailsController extends GetxController {
     return 'LEA${newNumber.toString().padLeft(5, '0')}';
   }
 
+  Future<int> fetchFollowUpCount(String docId) async {
+    log("➡️ Starting fetchFollowUpCount for docId: $docId");
+
+    try {
+      log("📌 Fetching document from Firestore...");
+      final docSnapshot = await FirebaseFirestore.instance
+          .collection('Leads')
+          .doc(docId)
+          .get();
+
+      log("📌 Document fetched. Exists: ${docSnapshot.exists}");
+
+      if (docSnapshot.exists) {
+        final data = docSnapshot.data();
+        log("📌 Document data: $data");
+
+        if (data != null && data.containsKey('followUpCount')) {
+          final count = data['followUpCount'] ?? 0;
+          log("✅ followUpCount found: $count");
+          return count;
+        } else {
+          log("⚠️ No 'followUpCount' field found in document");
+        }
+      } else {
+        log("⚠️ Document does not exist");
+      }
+
+      return 0; // default if not found
+    } catch (e, stack) {
+      log("❌ Error fetching followUpCount: $e");
+      log("Stacktrace: $stack");
+      return 0;
+    }
+  }
+
   Future<void> saveLead() async {
     if (!formKey.currentState!.validate()) {
       Get.snackbar(
@@ -268,19 +312,15 @@ class LeadDetailsController extends GetxController {
           .limit(1)
           .get();
 
-      if (querySnapshot.docs.isEmpty) {
-        Get.snackbar(
-          'Oops!',
-          'Selected product not found',
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-        );
-        return;
-      }
+      String productIdFromDoc;
 
-      final productDoc = querySnapshot.docs.first;
-      final productIdFromDoc =
-          productDoc['id']; // This is the 'id' field inside the document
+      if (querySnapshot.docs.isEmpty) {
+        // Fallback: use the selectedProductId.value directly
+        productIdFromDoc = selectedProductId.value!;
+      } else {
+        final productDoc = querySnapshot.docs.first;
+        productIdFromDoc = productDoc['id'];
+      } // This is the 'id' field inside the document
 
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) {
@@ -293,6 +333,23 @@ class LeadDetailsController extends GetxController {
         return;
       }
       final userId = currentUser.uid;
+
+      // Get the current followUpCount if updating
+      int newFollowUpCount = 0;
+      if (isUpdateMode.value && _currentLeadDocId != null) {
+        // Fetch current lead data to get the existing followUpCount
+        final currentLeadDoc = await _firestore
+            .collection('Leads')
+            .doc(_currentLeadDocId)
+            .get();
+
+        if (currentLeadDoc.exists) {
+          // Increment the existing count
+          newFollowUpCount = (currentLeadDoc.data()?['followUpCount'] ?? 0) + 1;
+          followUpCount.value = await fetchFollowUpCount(_currentLeadDocId!);
+          log("Follow up Count is:$followUpCount"); //count for UI display
+        }
+      }
 
       Map<String, dynamic> leadData = {
         'name': nameController.text,
@@ -308,7 +365,6 @@ class LeadDetailsController extends GetxController {
             ? remarkController.text
             : null,
         'status': selectedStatus.value,
-
         'followUpDate': followUpDate.value != null
             ? Timestamp.fromDate(followUpDate.value!)
             : null,
@@ -317,6 +373,8 @@ class LeadDetailsController extends GetxController {
             : "",
         'salesmanID': userId,
         'isArchived': false,
+        'followUpCount': newFollowUpCount, // Add the follow-up count
+        'lastFollowUp': Timestamp.now(), // Add timestamp of last follow-up
       };
 
       if (isUpdateMode.value && _currentLeadDocId != null) {
@@ -336,6 +394,7 @@ class LeadDetailsController extends GetxController {
         final leadId = await _generateLeadsId();
         leadData['leadId'] = leadId;
         leadData['createdAt'] = Timestamp.now();
+        leadData['followUpCount'] = 0; // Start with 0 for new leads
         await _firestore.collection('Leads').add(leadData);
         Get.snackbar(
           'Success',
@@ -661,9 +720,22 @@ class LeadDetailsController extends GetxController {
       await _firestore.collection('Leads').doc(leadDocId).update({
         'isArchived': true,
       });
-      await _firestore.collection('users').doc(userId).set({
-        'totalLeads': FieldValue.increment(-1), // decrement by 1
-      }, SetOptions(merge: true));
+      final userRef = _firestore.collection('users').doc(userId);
+
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(userRef);
+
+        if (!snapshot.exists) return;
+
+        final currentLeads = (snapshot.data()?['totalLeads'] ?? 0) as int;
+
+        if (currentLeads > 0) {
+          transaction.update(userRef, {'totalLeads': FieldValue.increment(-1)});
+        } else {
+          // ensure it stays at 0
+          transaction.update(userRef, {'totalLeads': 0});
+        }
+      });
 
       Get.snackbar(
         'Success',

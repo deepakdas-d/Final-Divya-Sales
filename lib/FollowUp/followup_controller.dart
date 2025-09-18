@@ -49,8 +49,8 @@ class FollowupController extends GetxController {
     super.onInit();
     loadFilterOptions();
     scrollController.addListener(_onScroll);
-    ever<List<QueryDocumentSnapshot>>(leads, (_) => computeCounts());
     fetchLeads();
+    fetchCounts();
 
     // Update searchQuery whenever the text field changes
     searchController.addListener(() {
@@ -73,74 +73,47 @@ class FollowupController extends GetxController {
 
   // ========================================
   /// Compute Overdue & Today counts
-  void computeCounts() {
+  Future<void> fetchCounts() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
     final uid = currentUser.uid;
 
-    overdueCount.value = leads.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return data['salesmanID'] == uid &&
-          _isFollowUpOverdue(data['followUpDate']);
-    }).length;
-
-    todayCount.value = leads.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return data['salesmanID'] == uid &&
-          _isFollowUpToday(data['followUpDate']);
-    }).length;
-
-    log(
-      'Computed Counts -> Overdue: ${overdueCount.value}, Today: ${todayCount.value}',
-    );
-  }
-
-  // ========================================
-  /// Checks if follow-up is overdue
-  bool _isFollowUpOverdue(dynamic followUpDate) {
-    if (followUpDate == null) return false;
     try {
-      DateTime date;
-      if (followUpDate is Timestamp) {
-        date = followUpDate.toDate();
-      } else if (followUpDate is String) {
-        date = DateTime.parse(followUpDate);
-      } else {
-        return false;
-      }
-      // Original logic (overdue if > 1 day old)
-      return date.isBefore(DateTime.now().subtract(const Duration(days: 1)));
-    } catch (e) {
-      print('Error checking overdue: $e');
-      return false;
-    }
-  }
+      // ✅ Overdue count
+      final overdueSnapshot = await _firestore
+          .collection('Leads')
+          .where('isArchived', isEqualTo: false)
+          .where('salesmanID', isEqualTo: uid)
+          .where('followUpDate', isLessThan: DateTime.now()) // before now
+          .get();
 
-  // ========================================
-  /// Checks if follow-up is today
-  bool _isFollowUpToday(dynamic followUpDate, {bool isArchived = false}) {
-    if (isArchived || followUpDate == null) return false;
+      overdueCount.value = overdueSnapshot.docs.length;
 
-    try {
-      DateTime date;
-      if (followUpDate is Timestamp) {
-        date = followUpDate.toDate();
-      } else if (followUpDate is String) {
-        date = DateTime.parse(followUpDate);
-      } else {
-        return false;
-      }
-
+      // ✅ Today count
       final now = DateTime.now();
-      return date.year == now.year &&
-          date.month == now.month &&
-          date.day == now.day;
+      final startOfDay = DateTime(now.year, now.month, now.day);
+      final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
+      final todaySnapshot = await _firestore
+          .collection('Leads')
+          .where('isArchived', isEqualTo: false)
+          .where('salesmanID', isEqualTo: uid)
+          .where('followUpDate', isGreaterThanOrEqualTo: startOfDay)
+          .where('followUpDate', isLessThanOrEqualTo: endOfDay)
+          .get();
+
+      todayCount.value = todaySnapshot.docs.length;
+
+      log(
+        "🔥 Firestore Counts -> Overdue: ${overdueCount.value}, Today: ${todayCount.value}",
+      );
     } catch (e) {
-      print('Error checking today: $e');
-      return false;
+      log("Error fetching counts: $e");
     }
   }
+
+  // ========================================
 
   // ========================================
   DocumentSnapshot? lastDocument; // Add to controller
@@ -150,19 +123,43 @@ class FollowupController extends GetxController {
       if (isFetchingMoreLeads.value || !hasMoreLeads.value) return;
     }
     try {
+      if (!loadMore) {
+        lastDocument = null;
+        hasMoreLeads.value = true;
+      }
       if (loadMore) {
         isFetchingMoreLeads.value = true;
       }
 
-      Query query = FirebaseFirestore.instance
+      Query query = _firestore
           .collection('Leads')
           .where('isArchived', isEqualTo: false)
           .where(
             'salesmanID',
             isEqualTo: FirebaseAuth.instance.currentUser!.uid,
           )
-          .orderBy('createdAt', descending: true)
+          .orderBy(
+            'followUpDate',
+            descending: false,
+          ) // ✅ earliest first (overdue first)
           .limit(20);
+
+      // ✅ Search filter
+      if (searchQuery.value.isNotEmpty) {
+        final q = searchQuery.value.trim().toLowerCase();
+
+        query = _firestore
+            .collection('Leads')
+            .where('isArchived', isEqualTo: false)
+            .where(
+              'salesmanID',
+              isEqualTo: FirebaseAuth.instance.currentUser!.uid,
+            )
+            .orderBy('name')
+            .startAt([q])
+            .endAt([q + '\uf8ff'])
+            .limit(20);
+      }
 
       if (loadMore && lastDocument != null) {
         query = query.startAfterDocument(lastDocument!);

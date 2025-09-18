@@ -78,7 +78,10 @@ class LeadList extends StatelessWidget {
       ),
       child: Obx(() {
         return TextField(
-          onChanged: (value) => controller.searchQuery.value = value,
+          onChanged: (value) {
+            controller.searchQuery.value = value;
+            controller.searchDatabase(value); //  Fire query to DB
+          },
           decoration: InputDecoration(
             hintText: 'Search by name, phone, address, ID...',
             hintStyle: GoogleFonts.k2d(

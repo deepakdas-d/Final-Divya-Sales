@@ -9,6 +9,7 @@ import 'package:sales/Complaint/complaint.dart';
 import 'package:sales/FollowUp/followup.dart';
 import 'package:sales/Lead/lead_list.dart';
 import 'package:sales/Lead/leadmanagement.dart';
+import 'package:sales/Lost_Leads/lost_leads.dart';
 import 'package:sales/Order/order_managmenet.dart';
 import 'package:sales/Profile/profile.dart';
 import 'package:sales/Review/review.dart';
@@ -98,6 +99,7 @@ class MyApp extends StatelessWidget {
         GetPage(name: "/profile", page: () => Profile()),
         GetPage(name: "/login", page: () => Signin()),
         GetPage(name: '/leadlist', page: () => LeadList()),
+        GetPage(name: '/lostlead', page: () => LostLeads()),
       ],
     );
   }

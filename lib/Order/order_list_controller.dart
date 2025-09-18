@@ -75,7 +75,7 @@ class OrderListController extends GetxController {
 
   void _initializeController() {
     // Bind search query to controller text changes with debouncing
-    searchController.addListener(_onSearchChanged);
+    searchController.addListener(onSearchChanged);
 
     // Listen to filter changes (but not during initialization)
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -88,7 +88,7 @@ class OrderListController extends GetxController {
     });
   }
 
-  void _onSearchChanged() {
+  void onSearchChanged() {
     _searchDebounceTimer?.cancel();
     _searchDebounceTimer = Timer(const Duration(milliseconds: 500), () {
       if (_searchQuery.value != searchController.text) {
@@ -218,7 +218,7 @@ class OrderListController extends GetxController {
           .where('createdAt', isLessThanOrEqualTo: endDate);
     }
 
-    // Apply pagination
+    // 🔹 Pagination
     query = query.limit(itemsPerPage);
     if (lastDocument != null) {
       query = query.startAfterDocument(lastDocument!);
@@ -266,7 +266,7 @@ class OrderListController extends GetxController {
 
     return fieldsToSearch.any((field) {
       final value = (data[field] ?? '').toString().toLowerCase();
-      return value.contains(searchLower);
+      return value.contains(searchLower); // ✅ Case-insensitive
     });
   }
 

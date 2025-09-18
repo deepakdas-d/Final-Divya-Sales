@@ -336,6 +336,14 @@ class Home extends StatelessWidget {
         'route': '/review',
       },
       {
+        'title': 'Lost Leads',
+        'subtitle': 'did not convert',
+        'icon': 'assets/svg/lost.svg',
+        'color': const Color(0xFF014185),
+        'count': () => '', // Static value
+        'route': '/lostlead',
+      },
+      {
         'title': 'Complaint',
         'subtitle': 'Support tickets',
         'icon': 'assets/svg/complaint.svg',

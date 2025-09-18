@@ -31,7 +31,9 @@ class FollowupPage extends StatelessWidget {
         appBar: _buildAppBar(context),
         body: RefreshIndicator(
           onRefresh: () async {
-            await controller.fetchLeads();
+            controller.lastDocument = null; // reset pagination
+            controller.hasMoreLeads.value = true; // allow loading again
+            await controller.fetchLeads(); // fresh load
             await controller.loadFilterOptions();
           },
           color: Colors.white,
@@ -221,7 +223,10 @@ class FollowupPage extends StatelessWidget {
               vertical: size.height * 0.018,
             ),
           ),
-          onChanged: (value) => controller.searchQuery.value = value,
+          onChanged: (value) {
+            controller.searchQuery.value = value;
+            controller.fetchLeads(loadMore: false); // 🔥 re-run query
+          },
         ),
       ),
     );

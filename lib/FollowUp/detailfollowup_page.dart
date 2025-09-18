@@ -4,7 +4,6 @@ import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:sales/FollowUp/detailsfollowup_controller.dart';
-import 'package:sales/FollowUp/followup.dart';
 import 'package:url_launcher/url_launcher.dart';
 // Changed controller import
 
@@ -63,7 +62,7 @@ class LeadDetailsPage extends StatelessWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () {
-            Get.offAll(FollowupPage());
+            Get.back();
           },
         ),
         actions: [
@@ -244,36 +243,63 @@ class LeadDetailsPage extends StatelessWidget {
 
                   FocusTraversalOrder(
                     order: const NumericFocusOrder(5),
-                    child: Obx(
-                      () => buildDropdownField(
-                        context,
-                        label: "Select Product",
-                        value: controller.selectedProductId.value,
-                        items: [
-                          const DropdownMenuItem<String>(
-                            value: null,
-                            child: Text("-- Select Product --"),
-                          ),
-                          ...controller.productIdList.map(
-                            (item) => DropdownMenuItem(
-                              value: item,
-                              child: Text(item),
+                    child: Obx(() {
+                      final selectedValue = controller.selectedProductId.value;
+
+                      // Valid if null OR exists in productIdList
+                      final isValidProduct =
+                          selectedValue == null ||
+                          controller.productIdList.contains(selectedValue);
+
+                      if (isValidProduct) {
+                        // Show Dropdown
+                        return buildDropdownField<String?>(
+                          context,
+                          label: "Select Product",
+                          value: selectedValue,
+                          items: [
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text("-- Select Product --"),
                             ),
+                            ...controller.productIdList.map(
+                              (item) => DropdownMenuItem<String?>(
+                                value: item,
+                                child: Text(item),
+                              ),
+                            ),
+                          ],
+                          onChanged: (String? value) {
+                            controller.selectedProductId.value = value;
+                            if (value != null) {
+                              controller.fetchProductImage(value);
+                            } else {
+                              controller.productImageUrl.value = null;
+                            }
+                          },
+                          validator: (value) =>
+                              value == null ? 'Product is required' : null,
+                          icon: Icons.inventory_2_outlined,
+                        );
+                      } else {
+                        // Show TextField for custom/unlisted product
+                        return TextFormField(
+                          enabled: controller.isEditing.value,
+                          initialValue: selectedValue,
+                          decoration: const InputDecoration(
+                            labelText: "Enter Product Name",
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.inventory_2_outlined),
                           ),
-                        ],
-                        onChanged: (value) {
-                          controller.selectedProductId.value = value;
-                          if (value != null) {
-                            controller.fetchProductImage(value);
-                          } else {
-                            controller.productImageUrl.value = null;
-                          }
-                        },
-                        validator: (value) =>
-                            value == null ? 'Product is required' : null,
-                        icon: Icons.inventory_2_outlined,
-                      ),
-                    ),
+                          onChanged: (value) {
+                            controller.selectedProductId.value = value;
+                          },
+                          validator: (value) => (value == null || value.isEmpty)
+                              ? 'Product is required'
+                              : null,
+                        );
+                      }
+                    }),
                   ),
 
                   SizedBox(height: screenHeight * 0.016),
@@ -770,34 +796,46 @@ class LeadDetailsPage extends StatelessWidget {
                           final isHot =
                               controller.selectedStatus.value == 'HOT';
 
-                          return ElevatedButton.icon(
-                            onPressed: isHot
-                                ? null
-                                : controller.toggleEditing, // disable if HOT
-                            icon: Icon(
-                              controller.isEditing.value
-                                  ? Icons.save_outlined
-                                  : Icons.edit_outlined,
-                              size: 18,
-                            ),
-                            label: Text(
-                              controller.isEditing.value
-                                  ? "Save Lead"
-                                  : "Edit Lead",
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: controller.isEditing.value
-                                  ? const Color(0xFF10B981)
-                                  : const Color(0xFFF59E0B),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                          return Obx(
+                            () => ElevatedButton.icon(
+                              onPressed: isHot
+                                  ? null
+                                  : () async {
+                                      if (controller.isEditing.value) {
+                                        // If in "Save Lead" mode, actually save the lead
+                                        await controller.saveLead();
+                                      } else {
+                                        // Switch to "Edit Lead" mode
+                                        controller.toggleEditing();
+                                      }
+                                    },
+                              icon: Icon(
+                                controller.isEditing.value
+                                    ? Icons.save_outlined
+                                    : Icons.edit_outlined,
+                                size: 18,
                               ),
-                              elevation: 0,
-                              textStyle: GoogleFonts.k2d(
-                                fontSize: screenHeight * 0.017,
-                                fontWeight: FontWeight.w500,
+                              label: Text(
+                                controller.isEditing.value
+                                    ? "Save Lead (${controller.followUpCount.value})"
+                                    : "Edit Lead (${controller.followUpCount.value})",
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: controller.isEditing.value
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFFF59E0B),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                elevation: 0,
+                                textStyle: GoogleFonts.k2d(
+                                  fontSize: screenHeight * 0.017,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ),
                           );

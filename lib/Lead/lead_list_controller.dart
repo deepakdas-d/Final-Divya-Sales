@@ -384,6 +384,56 @@ class LeadListController extends GetxController {
     await _loadInitialItems();
   }
 
+  Future<void> searchDatabase(String query) async {
+    if (query.isEmpty) {
+      _resetPagination();
+      await _loadInitialItems();
+      return;
+    }
+
+    isLoading.value = true;
+    try {
+      // Example: search by name starting with query
+      final leadsSnapshot = await _firestore
+          .collection('Leads')
+          .where('salesmanID', isEqualTo: currentUserId)
+          .where('name', isGreaterThanOrEqualTo: query)
+          .where('name', isLessThanOrEqualTo: query + '\uf8ff')
+          .limit(50)
+          .get();
+
+      final ordersSnapshot = await _firestore
+          .collection('Orders')
+          .where('salesmanID', isEqualTo: currentUserId)
+          .where('name', isGreaterThanOrEqualTo: query)
+          .where('name', isLessThanOrEqualTo: query + '\uf8ff')
+          .limit(50)
+          .get();
+
+      List<Map<String, dynamic>> results = [];
+
+      for (var doc in leadsSnapshot.docs) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        data['type'] = 'Lead';
+        results.add(data);
+      }
+
+      for (var doc in ordersSnapshot.docs) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        data['type'] = 'Order';
+        results.add(data);
+      }
+
+      filteredItems.assignAll(results);
+    } catch (e) {
+      print("Search error: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
   bool get hasActiveFilters =>
       _selectedType.value != 'All' ||
       _selectedStatus.value != 'All' ||
